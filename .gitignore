@@ -1,0 +1,21 @@
+# Dependencies and generated client bundles
+node_modules/
+**/node_modules/
+**/lib/
+coverage/
+**/coverage/
+
+# Local environment, runtime state, and installation records
+.env
+.env.*
+*.local.*
+.scratch/
+.cache/
+*.log
+INSTALLATION.md
+
+# OS and editor state
+.DS_Store
+.idea/
+.vscode/
+*.swp

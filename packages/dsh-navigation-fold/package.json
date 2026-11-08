@@ -1,0 +1,34 @@
+{
+  "name": "dsh-navigation-fold",
+  "version": "0.1.0",
+  "private": true,
+  "description": "功能导航折叠：仅折叠工作区上方功能入口，保留官方侧栏。",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["index.js", "lib/client.js", "cordis.patch.yml", "README.md"],
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {"patch": "./cordis.patch.yml"},
+    "client": {
+      "platform": "web",
+      "inject": ["@deepseek-ai/dsh-client-ui-sidebar"]
+    }
+  },
+  "engines": {"node": ">=22.19.0", "dsh": "^0.2.2-rc.1"},
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/build.mjs && node --test test/*.test.mjs",
+    "check": "node --check src/navigation-fold.js && node scripts/build.mjs && node --check lib/client.js && node --test test/*.test.mjs"
+  },
+  "devDependencies": {"jsdom": "29.1.1"},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Dikui/dk-dsh-UI.git",
+    "directory": "packages/dsh-navigation-fold"
+  }
+}

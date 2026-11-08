@@ -1,0 +1,13 @@
+{
+  "name": "dk-dsh-ui",
+  "private": true,
+  "description": "用于集中开发与维护 DeepSeek Harness 前端插件和界面增强的工作区。",
+  "packageManager": "pnpm@11.28.5",
+  "engines": {"node": ">=22.19.0"},
+  "scripts": {
+    "build": "pnpm -r --if-present run build",
+    "test": "pnpm -r --if-present run test",
+    "check": "pnpm -r --if-present run check"
+  },
+  "repository": {"type": "git", "url": "git+https://github.com/Dikui/dk-dsh-UI.git"}
+}
