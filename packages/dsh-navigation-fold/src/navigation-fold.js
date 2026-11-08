@@ -1,52 +1,128 @@
 /**
- * Add a reversible group toggle to the current official sidebar DOM.
+ * Add reversible, independent group toggles to the current official sidebar DOM.
  * This is a structural adapter, not an official sidebar extension contract.
  * @param {Document} document
- * @returns {() => void} Restore the original navigation and remove the enhancement.
+ * @returns {() => void} Restore the original sidebar and remove the enhancement.
  */
 export function installNavigationFold(document) {
   const window = document.defaultView;
   if (!window || !document.body) return () => {};
   const style = document.createElement('style');
   style.dataset.dshNavigationFoldStyle = '';
+  // The host workspace header already provides row padding. Add it only to the
+  // standalone navigation heading so both chevrons and labels share one grid.
   style.textContent = `
 [data-dsh-navigation-fold-hidden]{display:none!important}
-button[data-dsh-navigation-fold-toggle]{display:flex;align-items:center;gap:7px;flex-shrink:0;box-sizing:border-box;width:calc(100% - 16px);min-height:30px;margin:2px 8px 4px;padding:5px 8px;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary,currentColor);font:inherit;font-size:12px;text-align:left;cursor:pointer;-webkit-app-region:no-drag}
-button[data-dsh-navigation-fold-toggle]:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
-button[data-dsh-navigation-fold-toggle]:focus-visible{outline:2px solid var(--dsw-alias-label-primary,currentColor);outline-offset:1px}
-button[data-dsh-navigation-fold-toggle] svg{width:14px;height:14px;flex-shrink:0;transition:transform 120ms ease}
-button[data-dsh-navigation-fold-toggle][aria-expanded=false] svg{transform:rotate(-90deg)}
-[data-sidebar-collapsed=true] button[data-dsh-navigation-fold-toggle] span{display:none}
-[data-sidebar-collapsed=true] button[data-dsh-navigation-fold-toggle]{width:auto;margin-inline:0;padding-inline:0;justify-content:center}
-@media(prefers-reduced-motion:reduce){button[data-dsh-navigation-fold-toggle] svg{transition:none}}
+button[data-dsh-fold-toggle]{display:flex;align-items:center;gap:var(--dsh-sidebar-label-gap,6px);flex-shrink:0;box-sizing:border-box;width:100%;min-height:36px;margin:2px 0 4px;padding:0 var(--dsh-sidebar-row-padding,12px);border:0;border-radius:var(--dsw-radius-md,7px);background:transparent;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary,currentColor));font:inherit;font-size:12px;font-weight:400;line-height:20px;text-align:left;cursor:pointer;-webkit-app-region:no-drag}
+button[data-dsh-fold-toggle]:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
+button[data-dsh-fold-toggle]:focus-visible{outline:2px solid var(--dsw-alias-label-primary,currentColor);outline-offset:-2px}
+button[data-dsh-fold-toggle] svg{width:14px;height:14px;flex-shrink:0;transition:transform 120ms ease}
+button[data-dsh-fold-toggle][aria-expanded=false] svg{transform:rotate(-90deg)}
+button[data-dsh-workspace-fold-toggle]{width:auto;max-width:45%;min-width:0;margin:0 auto 0 0;padding:0}
+button[data-dsh-workspace-fold-toggle] span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+[data-sidebar-collapsed=true] button[data-dsh-fold-toggle] span{display:none}
+[data-sidebar-collapsed=true] button[data-dsh-fold-toggle]{width:auto;margin-inline:0;padding-inline:0;justify-content:center}
+@media(prefers-reduced-motion:reduce){button[data-dsh-fold-toggle] svg{transition:none}}
 `;
   document.head.append(style);
 
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.dataset.dshNavigationFoldToggle = '';
-  const label = '功能导航';
-  button.setAttribute('aria-label', label);
-  const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  chevron.setAttribute('viewBox', '0 0 16 16');
-  chevron.setAttribute('fill', 'none');
-  chevron.setAttribute('aria-hidden', 'true');
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', 'm4 6 4 4 4-4');
-  path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', '1.5');
-  path.setAttribute('stroke-linecap', 'round');
-  path.setAttribute('stroke-linejoin', 'round');
-  chevron.append(path);
-  const text = document.createElement('span');
-  text.textContent = label;
-  button.append(chevron, text);
-
-  const storageKey = 'dsh-navigation-fold:collapsed:v1';
-  let closed = false;
-  try { closed = window.localStorage.getItem(storageKey) === 'true'; } catch { /* Storage may be unavailable; memory still works. */ }
-  let target = null;
-  let addedId = false;
+  // Both groups use the same lifecycle, focus and persistence rules. Existing
+  // navigation identities stay unchanged; workspace preference has its own key.
+  function createFold(kind, storageKey) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.dshFoldToggle = '';
+    button.setAttribute(`data-dsh-${kind}-fold-toggle`, '');
+    const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    chevron.setAttribute('viewBox', '0 0 16 16');
+    chevron.setAttribute('fill', 'none');
+    chevron.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'm4 6 4 4 4-4');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.5');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    chevron.append(path);
+    const text = document.createElement('span');
+    button.append(chevron, text);
+    let closed = false;
+    try { closed = window.localStorage.getItem(storageKey) === 'true'; } catch { /* Memory still works when storage is unavailable. */ }
+    let binding = null;
+    let ownedId = null;
+    function persist() {
+      try { window.localStorage.setItem(storageKey, String(closed)); } catch { /* Keep the current page usable if persistence is denied. */ }
+    }
+    function reveal(event) {
+      if (!closed || button.contains(event.target)) return;
+      closed = false;
+      persist();
+      render();
+    }
+    function detach() {
+      if (binding) {
+        binding.content.removeAttribute('data-dsh-navigation-fold-hidden');
+        binding.title?.removeAttribute('data-dsh-navigation-fold-hidden');
+        if (ownedId && binding.content.id === ownedId) binding.content.removeAttribute('id');
+        binding.header?.removeEventListener('click', reveal, true);
+        binding.header?.removeEventListener('focusin', reveal);
+      }
+      binding = null;
+      ownedId = null;
+      button.remove();
+      button.removeAttribute('aria-controls');
+    }
+    function render() {
+      if (!binding) return;
+      const { content, anchor, title, search, label } = binding;
+      if (button.nextElementSibling !== anchor) anchor.before(button);
+      const caption = title?.textContent.trim() || label;
+      if (text.textContent !== caption) text.textContent = caption;
+      if (button.getAttribute('aria-label') !== caption) button.setAttribute('aria-label', caption);
+      const searching = search?.getAttribute('aria-expanded') === 'true';
+      if (searching && closed) { closed = false; persist(); }
+      if (closed && content.contains(document.activeElement)) button.focus();
+      content.toggleAttribute('data-dsh-navigation-fold-hidden', closed);
+      title?.setAttribute('data-dsh-navigation-fold-hidden', '');
+      button.toggleAttribute('data-dsh-navigation-fold-hidden', searching);
+      const expanded = String(!closed);
+      if (button.getAttribute('aria-expanded') !== expanded) button.setAttribute('aria-expanded', expanded);
+      button.setAttribute('aria-controls', content.id);
+      button.title = `${closed ? '展开' : '收起'}${caption}`;
+    }
+    function onClick() {
+      closed = !closed;
+      persist();
+      render();
+    }
+    button.addEventListener('click', onClick);
+    return {
+      sync(next) {
+        if (next?.content !== binding?.content || next?.anchor !== binding?.anchor ||
+          next?.header !== binding?.header || next?.search !== binding?.search) detach();
+        if (!next) return;
+        if (!binding) {
+          binding = next;
+          binding.header?.addEventListener('click', reveal, true);
+          binding.header?.addEventListener('focusin', reveal);
+        }
+        if (!binding.content.id) {
+          let index = 1;
+          while (document.getElementById(`dsh-${kind}-fold-group-${index}`)) index++;
+          ownedId = `dsh-${kind}-fold-group-${index}`;
+          binding.content.id = ownedId;
+        }
+        render();
+      },
+      dispose() {
+        button.removeEventListener('click', onClick);
+        detach();
+      },
+    };
+  }
+  const navigationFold = createFold('navigation', 'dsh-navigation-fold:collapsed:v1');
+  const workspaceFold = createFold('workspace', 'dsh-navigation-fold:workspaces-collapsed:v1');
+  let navigation = null;
   function findNavigation() {
     const candidates = new Set();
     for (const toggle of document.querySelectorAll('button[data-sidebar-toggle]')) {
@@ -63,49 +139,38 @@ button[data-dsh-navigation-fold-toggle][aria-expanded=false] svg{transform:rotat
     }
     return candidates.size === 1 ? [...candidates][0] : null;
   }
-  function detach() {
-    if (target) {
-      target.removeAttribute('data-dsh-navigation-fold-hidden');
-      if (addedId) target.removeAttribute('id');
-    }
-    target = null;
-    addedId = false;
-    button.remove();
-    button.removeAttribute('aria-controls');
-  }
-  function render() {
-    if (!target) return;
-    if (button.nextElementSibling !== target) target.before(button);
-    if (closed && target.contains(document.activeElement)) button.focus();
-    target.toggleAttribute('data-dsh-navigation-fold-hidden', closed);
-    button.setAttribute('aria-expanded', String(!closed));
-    button.setAttribute('aria-controls', target.id);
-    button.title = `${closed ? '展开' : '收起'}${label}`;
+  function findWorkspace(region) {
+    // DSH 0.2.2-rc.1 SlotOutlet wraps the browser in a display:contents anchor:
+    // region > [data-slot="sidebar.workspaces"] > browser > header + list.
+    // Match the official addressable anchor, never arbitrary wrapper depths.
+    // Narrow rails omit the title and have a different shape: leave them alone.
+    if (region.children.length !== 1) return null;
+    const slot = region.firstElementChild;
+    if (slot.tagName !== 'DIV' || slot.getAttribute('data-slot') !== 'sidebar.workspaces' ||
+      slot.children.length !== 1) return null;
+    const browser = slot.firstElementChild;
+    const [header, content] = browser.children;
+    if (browser.tagName !== 'DIV' || browser.children.length !== 2 ||
+      header?.tagName !== 'DIV' || content?.tagName !== 'DIV') return null;
+    const children = [...header.children].filter(child => !child.hasAttribute('data-dsh-workspace-fold-toggle'));
+    const title = children[0];
+    const inputs = header.querySelectorAll('input[type=text]');
+    if (title?.tagName !== 'SPAN' || !title.textContent.trim() || inputs.length !== 1) return null;
+    const searches = inputs[0].parentElement.querySelectorAll('button[aria-expanded][aria-label]');
+    if (searches.length !== 1) return null;
+    return { content, anchor: title, title, header, search: searches[0], label: '工作区' };
   }
   function sync() {
-    const next = findNavigation();
-    if (next !== target) detach();
-    if (!next) return;
-    target = next;
-    if (!target.id) {
-      let index = 1;
-      while (document.getElementById(`dsh-navigation-fold-group-${index}`)) index++;
-      target.id = `dsh-navigation-fold-group-${index}`;
-      addedId = true;
-    }
-    render();
-  }
-  function onClick() {
-    closed = !closed;
-    try { window.localStorage.setItem(storageKey, String(closed)); } catch { /* Keep the current page usable if persistence is denied. */ }
-    render();
+    navigation = findNavigation();
+    navigationFold.sync(navigation ? { content: navigation, anchor: navigation, label: '功能导航' } : null);
+    workspaceFold.sync(navigation ? findWorkspace(navigation.nextElementSibling) : null);
   }
   let disposed = false;
   let queued = false;
   const observer = new window.MutationObserver(records => {
-    // Ignore streaming chat updates outside the sidebar; coalesce actual sidebar changes.
-    if (target?.isConnected && !records.some(record =>
-      record.type === 'attributes' || target.parentElement?.contains(record.target) ||
+    // Ignore streaming chat updates outside the sidebar; coalesce sidebar changes.
+    if (navigation?.isConnected && !records.some(record =>
+      record.type === 'attributes' || navigation.parentElement?.contains(record.target) ||
       [...record.addedNodes, ...record.removedNodes].some(node => node.nodeType === 1 &&
         (node.matches('[data-sidebar-toggle]') || node.querySelector('[data-sidebar-toggle]')))
     )) return;
@@ -116,20 +181,20 @@ button[data-dsh-navigation-fold-toggle][aria-expanded=false] svg{transform:rotat
       if (!disposed) sync();
     });
   });
-  button.addEventListener('click', onClick);
   sync();
   observer.observe(document.body, {
     childList: true,
+    characterData: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ['data-sidebar-toggle', 'data-window-drag', 'aria-label'],
+    attributeFilter: ['data-sidebar-toggle', 'data-window-drag', 'data-slot', 'aria-label', 'aria-expanded'],
   });
   return () => {
     if (disposed) return;
     disposed = true;
     observer.disconnect();
-    button.removeEventListener('click', onClick);
-    detach();
+    workspaceFold.dispose();
+    navigationFold.dispose();
     style.remove();
   };
 }

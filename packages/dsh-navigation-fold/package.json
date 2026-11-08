@@ -1,8 +1,8 @@
 {
   "name": "dsh-navigation-fold",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
-  "description": "功能导航折叠：仅折叠工作区上方功能入口，保留官方侧栏。",
+  "description": "侧栏分组折叠：独立收起功能导航与工作区列表，保留官方侧栏操作。",
   "type": "module",
   "main": "./index.js",
   "exports": {
