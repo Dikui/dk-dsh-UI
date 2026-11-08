@@ -11,15 +11,17 @@ export function installNavigationFold(document) {
   style.dataset.dshNavigationFoldStyle = '';
   // The host workspace header already provides row padding. Add it only to the
   // standalone navigation heading so both chevrons and labels share one grid.
+  // Keep both headings visually light; the workspace hit area fills only the
+  // space before the native toolbar, without resizing or covering its controls.
   style.textContent = `
 [data-dsh-navigation-fold-hidden]{display:none!important}
 button[data-dsh-fold-toggle]{display:flex;align-items:center;gap:var(--dsh-sidebar-label-gap,6px);flex-shrink:0;box-sizing:border-box;width:100%;min-height:36px;margin:2px 0 4px;padding:0 var(--dsh-sidebar-row-padding,12px);border:0;border-radius:var(--dsw-radius-md,7px);background:transparent;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary,currentColor));font:inherit;font-size:12px;font-weight:400;line-height:20px;text-align:left;cursor:pointer;-webkit-app-region:no-drag}
-button[data-dsh-fold-toggle]:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
+@media(hover:hover){button[data-dsh-fold-toggle]:hover{color:var(--dsw-alias-label-secondary,currentColor)}}
 button[data-dsh-fold-toggle]:focus-visible{outline:2px solid var(--dsw-alias-label-primary,currentColor);outline-offset:-2px}
 button[data-dsh-fold-toggle] svg{width:14px;height:14px;flex-shrink:0;transition:transform 120ms ease}
 button[data-dsh-fold-toggle][aria-expanded=false] svg{transform:rotate(-90deg)}
-button[data-dsh-workspace-fold-toggle]{width:auto;max-width:45%;min-width:0;margin:0 auto 0 0;padding:0}
-button[data-dsh-workspace-fold-toggle] span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+button[data-dsh-workspace-fold-toggle]{flex:1 1 0;width:0;max-width:none;min-width:0;margin:0;padding:0}
+button[data-dsh-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 [data-sidebar-collapsed=true] button[data-dsh-fold-toggle] span{display:none}
 [data-sidebar-collapsed=true] button[data-dsh-fold-toggle]{width:auto;margin-inline:0;padding-inline:0;justify-content:center}
 @media(prefers-reduced-motion:reduce){button[data-dsh-fold-toggle] svg{transition:none}}
@@ -88,7 +90,6 @@ button[data-dsh-workspace-fold-toggle] span{overflow:hidden;white-space:nowrap;t
       const expanded = String(!closed);
       if (button.getAttribute('aria-expanded') !== expanded) button.setAttribute('aria-expanded', expanded);
       button.setAttribute('aria-controls', content.id);
-      button.title = `${closed ? '展开' : '收起'}${caption}`;
     }
     function onClick() {
       closed = !closed;
@@ -102,10 +103,11 @@ button[data-dsh-workspace-fold-toggle] span{overflow:hidden;white-space:nowrap;t
           next?.header !== binding?.header || next?.search !== binding?.search) detach();
         if (!next) return;
         if (!binding) {
-          binding = next;
-          binding.header?.addEventListener('click', reveal, true);
-          binding.header?.addEventListener('focusin', reveal);
+          next.header?.addEventListener('click', reveal, true);
+          next.header?.addEventListener('focusin', reveal);
         }
+        // Captions can change while their DOM anchors and fold state stay the same.
+        binding = next;
         if (!binding.content.id) {
           let index = 1;
           while (document.getElementById(`dsh-${kind}-fold-group-${index}`)) index++;
@@ -158,11 +160,14 @@ button[data-dsh-workspace-fold-toggle] span{overflow:hidden;white-space:nowrap;t
     if (title?.tagName !== 'SPAN' || !title.textContent.trim() || inputs.length !== 1) return null;
     const searches = inputs[0].parentElement.querySelectorAll('button[aria-expanded][aria-label]');
     if (searches.length !== 1) return null;
-    return { content, anchor: title, title, header, search: searches[0], label: '工作区' };
+    return { content, anchor: title, title, header, search: searches[0], label: title.textContent.trim() };
   }
   function sync() {
     navigation = findNavigation();
-    navigationFold.sync(navigation ? { content: navigation, anchor: navigation, label: '功能导航' } : null);
+    // DSH's locale service mirrors its active language to <html lang>.
+    // Follow that application setting, not the OS/browser language or host text.
+    const label = /^zh(?:-|$)/i.test(document.documentElement.lang) ? '功能导航' : 'Navigation';
+    navigationFold.sync(navigation ? { content: navigation, anchor: navigation, label } : null);
     workspaceFold.sync(navigation ? findWorkspace(navigation.nextElementSibling) : null);
   }
   let disposed = false;
@@ -189,6 +194,8 @@ button[data-dsh-workspace-fold-toggle] span{overflow:hidden;white-space:nowrap;t
     attributes: true,
     attributeFilter: ['data-sidebar-toggle', 'data-window-drag', 'data-slot', 'aria-label', 'aria-expanded'],
   });
+  // <html> is outside body: language-only changes otherwise never reach sync().
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] });
   return () => {
     if (disposed) return;
     disposed = true;

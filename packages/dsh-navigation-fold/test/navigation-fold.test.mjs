@@ -60,6 +60,73 @@ async function nextDomUpdate(window) {
   await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
 }
 
+// small/regression — English host sidebar still showed a Chinese plugin heading (2026-11-08).
+test('英文界面安装后功能导航标题不混用中文', () => {
+  const markup = sidebarMarkup().replace('>新会话<', '>New Session<').replace('>工作区<', '>Workspaces<');
+  const { dom, document, dispose } = setup(markup, window => {
+    window.document.documentElement.lang = 'en';
+  });
+  try {
+    assert.equal(workspaceToggle(document).textContent, 'Workspaces');
+    assert.equal(groupToggle(document).textContent, 'Navigation');
+    assert.equal(groupToggle(document).getAttribute('aria-label'), 'Navigation');
+  } finally { dispose(); dom.window.close(); }
+});
+
+test('导航标题识别宿主中英文语言标签，其他语言回退英文', () => {
+  for (const [language, expected] of [
+    ['zh', '功能导航'], ['zh-CN', '功能导航'], ['zh-Hans', '功能导航'],
+    ['en', 'Navigation'], ['en-US', 'Navigation'], ['ja', 'Navigation'], ['', 'Navigation'],
+  ]) {
+    const { dom, document, dispose } = setup(sidebarMarkup(), window => {
+      window.document.documentElement.lang = language;
+    });
+    try {
+      assert.equal(groupToggle(document).textContent, expected, language);
+      assert.equal(groupToggle(document).getAttribute('aria-label'), expected, language);
+    } finally { dispose(); dom.window.close(); }
+  }
+});
+
+test('原地切换语言更新标题和无障碍名称，保持两组折叠状态且停用后不再更新', async () => {
+  const { dom, document, dispose } = setup();
+  try {
+    const navigation = groupToggle(document);
+    const workspace = workspaceToggle(document);
+    navigation.click();
+    workspace.click();
+    const preferences = Object.entries(dom.window.localStorage);
+    for (const [language, expected, hostTitle] of [
+      ['en', 'Navigation', 'Workspaces'], ['zh-CN', '功能导航', '工作区'], ['en-US', 'Navigation', 'Sessions'],
+    ]) {
+      // First change only <html lang>: the signal lives outside the observed body.
+      document.documentElement.lang = language;
+      await nextDomUpdate(dom.window);
+      assert.equal(groupToggle(document), navigation, '复用按钮，不重建或重置状态');
+      assert.equal(navigation.textContent, expected);
+      assert.equal(navigation.getAttribute('aria-label'), expected);
+      // Host workspace text may arrive in a later render.
+      document.getElementById('workspace-label').textContent = hostTitle;
+      await nextDomUpdate(dom.window);
+      assert.equal(workspaceToggle(document), workspace);
+      assert.equal(workspace.textContent, hostTitle);
+      assert.equal(workspace.getAttribute('aria-label'), hostTitle);
+      for (const toggle of [navigation, workspace]) assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+      assert.equal(dom.window.getComputedStyle(document.querySelector('nav')).display, 'none');
+      assert.equal(dom.window.getComputedStyle(document.getElementById('workspace-list')).display, 'none');
+      assert.deepEqual(Object.entries(dom.window.localStorage), preferences);
+      assert.equal(document.querySelectorAll('[data-dsh-fold-toggle]').length, 2);
+      assert.equal(document.getElementById('new-session').textContent, '新会话', '不改写宿主文案');
+    }
+    dispose();
+    document.documentElement.lang = 'zh-CN';
+    await nextDomUpdate(dom.window);
+    assert.equal(groupToggle(document), null);
+    assert.equal(navigation.textContent, 'Navigation', '停用后已移除的按钮不再响应语言变化');
+    assert.notEqual(dom.window.getComputedStyle(document.getElementById('workspace-label')).display, 'none');
+  } finally { dispose(); dom.window.close(); }
+});
+
 test('功能导航可整组收起展开，其他侧栏区域和原有点击行为保持不变', () => {
   const { dom, document, dispose } = setup();
   try {
@@ -121,6 +188,22 @@ test('两组折叠标题使用相同字号与原生标题行高', () => {
       assert.equal(navigation[property], workspace[property], `两组标题的 ${property} 一致`);
     }
     assert.equal(navigation.minHeight, '36px', '沿用原生工作区标题的 36px 行高');
+  } finally { dispose(); dom.window.close(); }
+});
+
+// small/regression — screenshot reported a tooltip obscuring adjacent header controls (2026-11-08).
+test('折叠标题不弹出遮挡工具按钮的原生提示，仍提供名称和展开状态', () => {
+  const { dom, document, dispose } = setup();
+  try {
+    for (const toggle of [groupToggle(document), workspaceToggle(document)]) {
+      for (const expanded of ['true', 'false']) {
+        assert.equal(toggle.getAttribute('aria-expanded'), expanded);
+        assert.equal(toggle.getAttribute('aria-label'), toggle.textContent);
+        assert.equal(toggle.hasAttribute('title'), false, '已有可见标题和 aria-expanded，不重复显示原生气泡');
+        assert.ok(document.getElementById(toggle.getAttribute('aria-controls')));
+        toggle.click();
+      }
+    }
   } finally { dispose(); dom.window.close(); }
 });
 
@@ -349,7 +432,9 @@ test('本地存储不可用也可操作；清理后无额外按钮、隐藏属�
 });
 
 test('构建产物通过宿主模块入口挂载，插件生命周期结束即恢复导航', async () => {
-  const dom = new JSDOM(`<!doctype html><html><head></head><body>${sidebarMarkup()}</body></html>`, { url: 'http://localhost/' });
+  const dom = new JSDOM(`<!doctype html><html><head></head><body>${sidebarMarkup()}</body></html>`, {
+    url: 'http://localhost/', pretendToBeVisual: true,
+  });
   const disposers = [];
   try {
     let client;
@@ -362,6 +447,12 @@ test('构建产物通过宿主模块入口挂载，插件生命周期结束即�
     client.apply({ effect(start) { disposers.push(start()); } });
     const toggle = groupToggle(dom.window.document);
     assert.ok(toggle);
+    for (const [language, expected] of [['en', 'Navigation'], ['zh-CN', '功能导航']]) {
+      dom.window.document.documentElement.lang = language;
+      await nextDomUpdate(dom.window);
+      assert.equal(toggle.textContent, expected, '构建产物通过公开入口同步语言');
+      assert.equal(toggle.getAttribute('aria-label'), expected);
+    }
     toggle.click();
     workspaceToggle(dom.window.document).click();
     assert.equal(dom.window.getComputedStyle(dom.window.document.querySelector('nav')).display, 'none');
