@@ -8,7 +8,7 @@ importers:
 
   .: {}
 
-  packages/dsh-navigation-fold:
+  packages/dk-navigation-fold:
     devDependencies:
       jsdom:
         specifier: 29.1.1

@@ -45,10 +45,10 @@ function setup(html = sidebarMarkup(), prepare = () => {}) {
   return { dom, document, dispose };
 }
 function groupToggle(document) {
-  return document.querySelector('button[data-dsh-navigation-fold-toggle]');
+  return document.querySelector('button[data-dk-navigation-fold-toggle]');
 }
 function workspaceToggle(document) {
-  return document.querySelector('button[data-dsh-workspace-fold-toggle]');
+  return document.querySelector('button[data-dk-workspace-fold-toggle]');
 }
 function assertUnchangedOtherRegions(document) {
   for (const id of ['logo', 'new-session', 'workspaces', 'settings']) {
@@ -115,7 +115,7 @@ test('原地切换语言更新标题和无障碍名称，保持两组折叠状�
       assert.equal(dom.window.getComputedStyle(document.querySelector('nav')).display, 'none');
       assert.equal(dom.window.getComputedStyle(document.getElementById('workspace-list')).display, 'none');
       assert.deepEqual(Object.entries(dom.window.localStorage), preferences);
-      assert.equal(document.querySelectorAll('[data-dsh-fold-toggle]').length, 2);
+      assert.equal(document.querySelectorAll('[data-dk-fold-toggle]').length, 2);
       assert.equal(document.getElementById('new-session').textContent, '新会话', '不改写宿主文案');
     }
     dispose();
@@ -228,7 +228,7 @@ test('官方工作区插槽晚挂载或重建后可折叠，错误插槽不误�
     assert.notEqual(dom.window.getComputedStyle(document.getElementById('workspace-label')).display, 'none');
     slot.setAttribute('data-slot', 'sidebar.workspaces');
     await nextDomUpdate(dom.window);
-    assert.equal(document.querySelectorAll('[data-dsh-workspace-fold-toggle]').length, 1);
+    assert.equal(document.querySelectorAll('[data-dk-workspace-fold-toggle]').length, 1);
     dispose();
     assert.equal(document.querySelector('[data-slot="sidebar.workspaces"]'), slot);
     assert.equal(slot.style.display, 'contents');
@@ -278,23 +278,26 @@ test('工作区标题跟随原分组文案，搜索展开时不挤占输入框',
   } finally { dispose(); dom.window.close(); }
 });
 
-test('工作区折叠独立持久化，兼容已有功能导航偏好', () => {
+test('工作区折叠独立持久化，旧 key 仅作回退', () => {
   const initial = setup(sidebarMarkup(), window => window.localStorage.setItem('dsh-navigation-fold:collapsed:v1', 'true'));
   let workspacePreference;
   try {
-    assert.equal(groupToggle(initial.document).getAttribute('aria-expanded'), 'false');
+    assert.equal(groupToggle(initial.document).getAttribute('aria-expanded'), 'false', '读取旧功能导航 key');
     assert.equal(workspaceToggle(initial.document).getAttribute('aria-expanded'), 'true');
     workspaceToggle(initial.document).click();
     const storage = initial.dom.window.localStorage;
-    const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index));
-    const key = keys.find(key => key !== 'dsh-navigation-fold:collapsed:v1');
-    workspacePreference = [key, storage.getItem(key)];
-    assert.equal(workspacePreference[1], 'true');
+    workspacePreference = ['dk-navigation-fold:workspaces-collapsed:v1', storage.getItem('dk-navigation-fold:workspaces-collapsed:v1')];
+    assert.equal(workspacePreference[1], 'true', '新状态写入新 key');
+    assert.equal(storage.getItem('dsh-navigation-fold:collapsed:v1'), 'true', '旧 key 不被改写');
   } finally { initial.dispose(); initial.dom.window.close(); }
-  const refreshed = setup(sidebarMarkup(), window => window.localStorage.setItem(...workspacePreference));
+  const refreshed = setup(sidebarMarkup(), window => {
+    window.localStorage.setItem(...workspacePreference);
+    window.localStorage.setItem('dsh-navigation-fold:collapsed:v1', 'true');
+    window.localStorage.setItem('dk-navigation-fold:collapsed:v1', 'false');
+  });
   try {
     assert.equal(workspaceToggle(refreshed.document).getAttribute('aria-expanded'), 'false');
-    assert.equal(groupToggle(refreshed.document).getAttribute('aria-expanded'), 'true');
+    assert.equal(groupToggle(refreshed.document).getAttribute('aria-expanded'), 'true', '新 key 优先于旧 key');
   } finally { refreshed.dispose(); refreshed.dom.window.close(); }
 });
 
@@ -318,7 +321,7 @@ test('工作区重建后保持收起，结构变化时放开列表而不影响�
     assert.ok(groupToggle(document));
     header.prepend(label);
     await nextDomUpdate(dom.window);
-    assert.equal(document.querySelectorAll('button[data-dsh-workspace-fold-toggle]').length, 1);
+    assert.equal(document.querySelectorAll('button[data-dk-workspace-fold-toggle]').length, 1);
     assert.equal(dom.window.getComputedStyle(list).display, 'none');
   } finally { dispose(); dom.window.close(); }
 });
@@ -359,7 +362,7 @@ test('停用时恢复工作区原标题与列表并移除开关监听', async ()
     await nextDomUpdate(dom.window);
     assert.deepEqual(Object.entries(storage), before);
     assert.equal(workspaceToggle(document), null);
-    assert.equal(document.querySelector('[data-dsh-navigation-fold-hidden]'), null);
+    assert.equal(document.querySelector('[data-dk-navigation-fold-hidden]'), null);
     assert.notEqual(dom.window.getComputedStyle(document.getElementById('workspace-label')).display, 'none');
     assert.notEqual(dom.window.getComputedStyle(document.getElementById('workspace-list')).display, 'none');
   } finally { dispose(); dom.window.close(); }
@@ -380,7 +383,7 @@ test('导航重建后保留折叠，定位失效时恢复原导航，恢复定�
     assert.notEqual(dom.window.getComputedStyle(document.querySelector('nav')).display, 'none');
     sidebarToggle.setAttribute('data-sidebar-toggle', 'true');
     await nextDomUpdate(dom.window);
-    assert.equal(document.querySelectorAll('button[data-dsh-navigation-fold-toggle]').length, 1);
+    assert.equal(document.querySelectorAll('button[data-dk-navigation-fold-toggle]').length, 1);
     assert.equal(dom.window.getComputedStyle(document.querySelector('nav')).display, 'none');
     assertUnchangedOtherRegions(document);
   } finally { dispose(); dom.window.close(); }
@@ -407,7 +410,7 @@ test('未出现侧栏时等待挂载；无关导航不受影响，定位不唯�
     await nextDomUpdate(dom.window);
     assert.equal(groupToggle(document), null, '多个可能的侧栏时宁可不折叠');
     assert.equal(workspaceToggle(document), null);
-    assert.equal(document.querySelector('[data-dsh-navigation-fold-hidden]'), null);
+    assert.equal(document.querySelector('[data-dk-navigation-fold-hidden]'), null);
     for (const nav of document.querySelectorAll('nav')) assert.notEqual(dom.window.getComputedStyle(nav).display, 'none');
   } finally { dispose(); dom.window.close(); }
 });
@@ -425,8 +428,8 @@ test('本地存储不可用也可操作；清理后无额外按钮、隐藏属�
     dispose(); // Cancel a pending observer update too.
     await nextDomUpdate(dom.window);
     assert.equal(groupToggle(document), null);
-    assert.equal(document.querySelector('[data-dsh-navigation-fold-style]'), null);
-    assert.equal(document.querySelector('[data-dsh-navigation-fold-hidden]'), null);
+    assert.equal(document.querySelector('[data-dk-navigation-fold-style]'), null);
+    assert.equal(document.querySelector('[data-dk-navigation-fold-hidden]'), null);
     assert.notEqual(dom.window.getComputedStyle(document.querySelector('nav')).display, 'none');
   } finally { dispose(); dom.window.close(); }
 });
@@ -460,7 +463,7 @@ test('构建产物通过宿主模块入口挂载，插件生命周期结束即�
     for (const dispose of disposers) dispose();
     assert.equal(groupToggle(dom.window.document), null);
     assert.equal(workspaceToggle(dom.window.document), null);
-    assert.equal(dom.window.document.querySelector('[data-dsh-navigation-fold-hidden]'), null);
+    assert.equal(dom.window.document.querySelector('[data-dk-navigation-fold-hidden]'), null);
     assert.notEqual(dom.window.getComputedStyle(dom.window.document.querySelector('nav')).display, 'none');
   } finally { for (const dispose of disposers) dispose(); dom.window.close(); }
 });
@@ -472,6 +475,7 @@ test('停用插件完整恢复导航，但页面刷新仍能记住上次收起�
     groupToggle(first.document).click();
     const storage = first.dom.window.localStorage;
     assert.equal(storage.length, 1, '只保存一项插件自己的偏好');
+    assert.equal(storage.key(0), 'dk-navigation-fold:collapsed:v1');
     persisted = [storage.key(0), storage.getItem(storage.key(0))];
     first.dispose();
     assert.equal(groupToggle(first.document), null);

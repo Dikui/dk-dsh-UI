@@ -8,33 +8,33 @@ export function installNavigationFold(document) {
   const window = document.defaultView;
   if (!window || !document.body) return () => {};
   const style = document.createElement('style');
-  style.dataset.dshNavigationFoldStyle = '';
+  style.dataset.dkNavigationFoldStyle = '';
   // The host workspace header already provides row padding. Add it only to the
   // standalone navigation heading so both chevrons and labels share one grid.
   // Keep both headings visually light; the workspace hit area fills only the
   // space before the native toolbar, without resizing or covering its controls.
   style.textContent = `
-[data-dsh-navigation-fold-hidden]{display:none!important}
-button[data-dsh-fold-toggle]{display:flex;align-items:center;gap:var(--dsh-sidebar-label-gap,6px);flex-shrink:0;box-sizing:border-box;width:100%;min-height:36px;margin:2px 0 4px;padding:0 var(--dsh-sidebar-row-padding,12px);border:0;border-radius:var(--dsw-radius-md,7px);background:transparent;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary,currentColor));font:inherit;font-size:12px;font-weight:400;line-height:20px;text-align:left;cursor:pointer;-webkit-app-region:no-drag}
-@media(hover:hover){button[data-dsh-fold-toggle]:hover{color:var(--dsw-alias-label-secondary,currentColor)}}
-button[data-dsh-fold-toggle]:focus-visible{outline:2px solid var(--dsw-alias-label-primary,currentColor);outline-offset:-2px}
-button[data-dsh-fold-toggle] svg{width:14px;height:14px;flex-shrink:0;transition:transform 120ms ease}
-button[data-dsh-fold-toggle][aria-expanded=false] svg{transform:rotate(-90deg)}
-button[data-dsh-workspace-fold-toggle]{flex:1 1 0;width:0;max-width:none;min-width:0;margin:0;padding:0}
-button[data-dsh-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-[data-sidebar-collapsed=true] button[data-dsh-fold-toggle] span{display:none}
-[data-sidebar-collapsed=true] button[data-dsh-fold-toggle]{width:auto;margin-inline:0;padding-inline:0;justify-content:center}
-@media(prefers-reduced-motion:reduce){button[data-dsh-fold-toggle] svg{transition:none}}
+[data-dk-navigation-fold-hidden]{display:none!important}
+button[data-dk-fold-toggle]{display:flex;align-items:center;gap:var(--dsh-sidebar-label-gap,6px);flex-shrink:0;box-sizing:border-box;width:100%;min-height:36px;margin:2px 0 4px;padding:0 var(--dsh-sidebar-row-padding,12px);border:0;border-radius:var(--dsw-radius-md,7px);background:transparent;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary,currentColor));font:inherit;font-size:12px;font-weight:400;line-height:20px;text-align:left;cursor:pointer;-webkit-app-region:no-drag}
+@media(hover:hover){button[data-dk-fold-toggle]:hover{color:var(--dsw-alias-label-secondary,currentColor)}}
+button[data-dk-fold-toggle]:focus-visible{outline:2px solid var(--dsw-alias-label-primary,currentColor);outline-offset:-2px}
+button[data-dk-fold-toggle] svg{width:14px;height:14px;flex-shrink:0;transition:transform 120ms ease}
+button[data-dk-fold-toggle][aria-expanded=false] svg{transform:rotate(-90deg)}
+button[data-dk-workspace-fold-toggle]{flex:1 1 0;width:0;max-width:none;min-width:0;margin:0;padding:0}
+button[data-dk-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+[data-sidebar-collapsed=true] button[data-dk-fold-toggle] span{display:none}
+[data-sidebar-collapsed=true] button[data-dk-fold-toggle]{width:auto;margin-inline:0;padding-inline:0;justify-content:center}
+@media(prefers-reduced-motion:reduce){button[data-dk-fold-toggle] svg{transition:none}}
 `;
   document.head.append(style);
 
-  // Both groups use the same lifecycle, focus and persistence rules. Existing
-  // navigation identities stay unchanged; workspace preference has its own key.
-  function createFold(kind, storageKey) {
+  // Both groups use the same lifecycle, focus and persistence rules. New writes
+  // use the dk- keys; the pre-rename dsh- keys remain readable as a fallback.
+  function createFold(kind, storageKey, legacyStorageKey) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.dataset.dshFoldToggle = '';
-    button.setAttribute(`data-dsh-${kind}-fold-toggle`, '');
+    button.dataset.dkFoldToggle = '';
+    button.setAttribute(`data-dk-${kind}-fold-toggle`, '');
     const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     chevron.setAttribute('viewBox', '0 0 16 16');
     chevron.setAttribute('fill', 'none');
@@ -49,7 +49,9 @@ button[data-dsh-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap
     const text = document.createElement('span');
     button.append(chevron, text);
     let closed = false;
-    try { closed = window.localStorage.getItem(storageKey) === 'true'; } catch { /* Memory still works when storage is unavailable. */ }
+    try {
+      closed = (window.localStorage.getItem(storageKey) ?? window.localStorage.getItem(legacyStorageKey)) === 'true';
+    } catch { /* Memory still works when storage is unavailable. */ }
     let binding = null;
     let ownedId = null;
     function persist() {
@@ -63,8 +65,8 @@ button[data-dsh-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap
     }
     function detach() {
       if (binding) {
-        binding.content.removeAttribute('data-dsh-navigation-fold-hidden');
-        binding.title?.removeAttribute('data-dsh-navigation-fold-hidden');
+        binding.content.removeAttribute('data-dk-navigation-fold-hidden');
+        binding.title?.removeAttribute('data-dk-navigation-fold-hidden');
         if (ownedId && binding.content.id === ownedId) binding.content.removeAttribute('id');
         binding.header?.removeEventListener('click', reveal, true);
         binding.header?.removeEventListener('focusin', reveal);
@@ -84,9 +86,9 @@ button[data-dsh-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap
       const searching = search?.getAttribute('aria-expanded') === 'true';
       if (searching && closed) { closed = false; persist(); }
       if (closed && content.contains(document.activeElement)) button.focus();
-      content.toggleAttribute('data-dsh-navigation-fold-hidden', closed);
-      title?.setAttribute('data-dsh-navigation-fold-hidden', '');
-      button.toggleAttribute('data-dsh-navigation-fold-hidden', searching);
+      content.toggleAttribute('data-dk-navigation-fold-hidden', closed);
+      title?.setAttribute('data-dk-navigation-fold-hidden', '');
+      button.toggleAttribute('data-dk-navigation-fold-hidden', searching);
       const expanded = String(!closed);
       if (button.getAttribute('aria-expanded') !== expanded) button.setAttribute('aria-expanded', expanded);
       button.setAttribute('aria-controls', content.id);
@@ -110,8 +112,8 @@ button[data-dsh-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap
         binding = next;
         if (!binding.content.id) {
           let index = 1;
-          while (document.getElementById(`dsh-${kind}-fold-group-${index}`)) index++;
-          ownedId = `dsh-${kind}-fold-group-${index}`;
+          while (document.getElementById(`dk-${kind}-fold-group-${index}`)) index++;
+          ownedId = `dk-${kind}-fold-group-${index}`;
           binding.content.id = ownedId;
         }
         render();
@@ -122,8 +124,10 @@ button[data-dsh-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap
       },
     };
   }
-  const navigationFold = createFold('navigation', 'dsh-navigation-fold:collapsed:v1');
-  const workspaceFold = createFold('workspace', 'dsh-navigation-fold:workspaces-collapsed:v1');
+  const navigationFold = createFold('navigation',
+    'dk-navigation-fold:collapsed:v1', 'dsh-navigation-fold:collapsed:v1');
+  const workspaceFold = createFold('workspace',
+    'dk-navigation-fold:workspaces-collapsed:v1', 'dsh-navigation-fold:workspaces-collapsed:v1');
   let navigation = null;
   function findNavigation() {
     const candidates = new Set();
@@ -154,7 +158,7 @@ button[data-dsh-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap
     const [header, content] = browser.children;
     if (browser.tagName !== 'DIV' || browser.children.length !== 2 ||
       header?.tagName !== 'DIV' || content?.tagName !== 'DIV') return null;
-    const children = [...header.children].filter(child => !child.hasAttribute('data-dsh-workspace-fold-toggle'));
+    const children = [...header.children].filter(child => !child.hasAttribute('data-dk-workspace-fold-toggle'));
     const title = children[0];
     const inputs = header.querySelectorAll('input[type=text]');
     if (title?.tagName !== 'SPAN' || !title.textContent.trim() || inputs.length !== 1) return null;

@@ -1,6 +1,6 @@
 {
-  "name": "dsh-navigation-fold",
-  "version": "0.1.2",
+  "name": "dk-navigation-fold",
+  "version": "0.2.0",
   "private": true,
   "description": "侧栏分组折叠：独立收起功能导航与工作区列表，保留官方侧栏操作。",
   "type": "module",
@@ -28,7 +28,7 @@
   "devDependencies": {"jsdom": "29.1.1"},
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Dikui/dk-dsh-UI.git",
-    "directory": "packages/dsh-navigation-fold"
+    "url": "git+https://github.com/Dikui/dk-dsh-front.git",
+    "directory": "packages/dk-navigation-fold"
   }
 }

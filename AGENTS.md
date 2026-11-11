@@ -1,4 +1,4 @@
-# dk-dsh-UI 开发约定
+# dk-dsh-front 开发约定
 
 此仓库集中维护 DeepSeek Harness 前端插件与界面增强，不是 DSH 官方源码分支。
 
