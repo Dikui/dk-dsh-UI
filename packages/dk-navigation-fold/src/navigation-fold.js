@@ -130,24 +130,36 @@ button[data-dk-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap;
     'dk-navigation-fold:workspaces-collapsed:v1', 'dsh-navigation-fold:workspaces-collapsed:v1');
   let navigation = null;
   function findNavigation() {
-    const candidates = new Set();
+    // DSH 0.2.2-rc.2 moved the navigation into a grid scroll area below the
+    // logo row, so the toggle and NAV no longer share a direct parent. Match
+    // the sidebar root instead: one NAV whose following region owns the
+    // official workspace slot, and insert before the root child holding NAV.
+    const candidates = new Map();
     for (const toggle of document.querySelectorAll('button[data-sidebar-toggle]')) {
       let container = toggle.parentElement;
       while (container && container !== document.body) {
-        const navs = [...container.children].filter(child => child.tagName === 'NAV');
-        const brand = [...container.children].some(child => child.hasAttribute('data-window-drag'));
-        if (brand && navs.length === 1 && navs[0].hasAttribute('aria-label') && navs[0].nextElementSibling?.tagName === 'DIV') {
-          candidates.add(navs[0]);
+        const navs = [...container.querySelectorAll('nav[aria-label]')].filter(nav => {
+          const region = nav.nextElementSibling;
+          return region?.tagName === 'DIV' &&
+            region.querySelector('[data-slot="sidebar.workspaces"]');
+        });
+        if (navs.length === 1) {
+          const nav = navs[0];
+          const anchor = [...container.children].find(child => child === nav || child.contains(nav));
+          // Never insert above a wrapper that also owns the toggle: that would
+          // detach the control from the sidebar body instead of placing it
+          // beside NAV. The official rc.1/rc.2 layouts keep them separate.
+          if (anchor && !anchor.contains(toggle)) candidates.set(nav, { nav, anchor, root: container });
           break;
         }
         container = container.parentElement;
       }
     }
-    return candidates.size === 1 ? [...candidates][0] : null;
+    return candidates.size === 1 ? [...candidates.values()][0] : null;
   }
   function findWorkspace(region) {
-    // DSH 0.2.2-rc.1 SlotOutlet wraps the browser in a display:contents anchor:
-    // region > [data-slot="sidebar.workspaces"] > browser > header + list.
+    // DSH 0.2.2-rc.1/rc.2 SlotOutlet wraps the browser in a display:contents
+    // anchor: region > [data-slot="sidebar.workspaces"] > browser > header + list.
     // Match the official addressable anchor, never arbitrary wrapper depths.
     // Narrow rails omit the title and have a different shape: leave them alone.
     if (region.children.length !== 1) return null;
@@ -171,17 +183,21 @@ button[data-dk-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap;
     // DSH's locale service mirrors its active language to <html lang>.
     // Follow that application setting, not the OS/browser language or host text.
     const label = /^zh(?:-|$)/i.test(document.documentElement.lang) ? '功能导航' : 'Navigation';
-    navigationFold.sync(navigation ? { content: navigation, anchor: navigation, label } : null);
-    workspaceFold.sync(navigation ? findWorkspace(navigation.nextElementSibling) : null);
+    navigationFold.sync(navigation
+      ? { content: navigation.nav, anchor: navigation.anchor, label }
+      : null);
+    workspaceFold.sync(navigation ? findWorkspace(navigation.nav.nextElementSibling) : null);
   }
   let disposed = false;
   let queued = false;
   const observer = new window.MutationObserver(records => {
     // Ignore streaming chat updates outside the sidebar; coalesce sidebar changes.
-    if (navigation?.isConnected && !records.some(record =>
-      record.type === 'attributes' || navigation.parentElement?.contains(record.target) ||
+    const sidebar = navigation?.root;
+    if (sidebar?.isConnected && !records.some(record =>
+      record.type === 'attributes' || sidebar.contains(record.target) ||
       [...record.addedNodes, ...record.removedNodes].some(node => node.nodeType === 1 &&
-        (node.matches('[data-sidebar-toggle]') || node.querySelector('[data-sidebar-toggle]')))
+        (node === sidebar || node.contains(sidebar) ||
+          node.matches('[data-sidebar-toggle]') || node.querySelector('[data-sidebar-toggle]')))
     )) return;
     if (queued || disposed) return;
     queued = true;

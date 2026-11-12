@@ -33,6 +33,36 @@ function sidebarMarkup() {
     <div id="settings">设置</div>
   </div>`;
 }
+// DSH 0.2.2-rc.2 puts the panel NAV and workspace region inside a grid scroll
+// area below the title strip; the sidebar toggle is no longer a sibling of NAV.
+function sidebarMarkupRc2() {
+  return `<div id="sidebar" style="width:260px">
+    <div data-window-drag="true"><button data-sidebar-toggle="true" type="button">整个侧栏开关</button></div>
+    <div data-window-drag="true" id="logo">deepseek HARNESS</div>
+    <button id="new-session" type="button">新会话</button>
+    <div id="scroll-region">
+      <div id="scroll-area" data-sidebar-scrollport="">
+        <nav aria-label="功能入口" style="display:flex">
+          <button type="button">插件</button><button type="button">自媒体工作台</button>
+          <button type="button">歸藏设计</button><button type="button">Superagent</button>
+          <button type="button">自动化任务</button><button type="button">上下文洞察</button>
+          <button type="button">作品</button><div><button type="button">更多</button></div>
+        </nav>
+        <div id="region-area">
+          <div data-slot="sidebar.workspaces" style="display:contents"><div id="workspace-browser">
+            <div id="workspace-header">
+              <span id="workspace-label">工作区</span>
+              <div><div><button id="workspace-search" aria-label="搜索会话" aria-expanded="false">搜索</button><input type="text" tabindex="-1"></div></div>
+              <div><button id="workspace-view" aria-label="视图选项">视图</button><button id="workspace-add" aria-label="新增工作区">新增</button></div>
+            </div>
+            <div id="workspace-list"><button data-row-key="workspace:example">example-workspace</button><button data-row-key="session:example">example-session</button></div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+    <div id="settings">设置</div>
+  </div>`;
+}
 function setup(html = sidebarMarkup(), prepare = () => {}) {
   // Minimal host typography from the wide sidebar; layout pixels are separately checked in Chromium.
   const hostStyles = `<style>#sidebar{font:14px/20px sans-serif;--dsh-sidebar-row-padding:12px;--dsh-sidebar-label-gap:6px;--dsw-alias-label-secondary:#bcc3ca;--dsw-alias-label-tertiary:#8f9aa1}#workspace-header{height:36px;color:var(--dsw-alias-label-tertiary)}</style>`;
@@ -146,6 +176,52 @@ test('功能导航可整组收起展开，其他侧栏区域和原有点击行�
     nav.querySelector('button').click();
     assert.equal(originalClicks, 1);
     assertUnchangedOtherRegions(document);
+  } finally { dispose(); dom.window.close(); }
+});
+
+// regression — DSH 0.2.2-rc.2 moved NAV into a grid scroll area; the old
+// direct-sibling locator silently disabled both toggles.
+test('rc.2 网格滚动区中仍可折叠导航与工作区，导航开关不进入网格', () => {
+  const { dom, document, dispose } = setup(sidebarMarkupRc2());
+  try {
+    const navigation = groupToggle(document);
+    const workspace = workspaceToggle(document);
+    const scrollRegion = document.getElementById('scroll-region');
+    const scrollArea = document.getElementById('scroll-area');
+    const nav = document.querySelector('nav');
+    const list = document.getElementById('workspace-list');
+    assert.ok(navigation, 'rc.2 侧栏出现功能导航开关');
+    assert.ok(workspace, 'rc.2 侧栏出现工作区开关');
+    assert.equal(navigation.parentElement.id, 'sidebar');
+    assert.equal(navigation.nextElementSibling, scrollRegion, '导航开关插在滚动区之前，不进入 grid');
+    assert.equal(scrollArea.querySelector('[data-dk-navigation-fold-toggle]'), null);
+    assert.equal(workspace.parentElement.id, 'workspace-header');
+    assert.equal(workspace.nextElementSibling.id, 'workspace-label');
+    navigation.click();
+    assert.equal(navigation.getAttribute('aria-expanded'), 'false');
+    assert.equal(dom.window.getComputedStyle(nav).display, 'none');
+    assert.notEqual(dom.window.getComputedStyle(scrollRegion).display, 'none');
+    workspace.click();
+    assert.equal(workspace.getAttribute('aria-expanded'), 'false');
+    assert.equal(dom.window.getComputedStyle(list).display, 'none');
+    assert.notEqual(dom.window.getComputedStyle(document.getElementById('workspace-header')).display, 'none');
+  } finally { dispose(); dom.window.close(); }
+});
+
+test('rc.2 侧栏整体重建后重新定位，停用恢复原结构', async () => {
+  const { dom, document, dispose } = setup(sidebarMarkupRc2());
+  try {
+    groupToggle(document).click();
+    document.getElementById('sidebar').outerHTML = sidebarMarkupRc2();
+    await nextDomUpdate(dom.window);
+    assert.equal(groupToggle(document)?.getAttribute('aria-expanded'), 'false');
+    assert.equal(dom.window.getComputedStyle(document.querySelector('nav')).display, 'none');
+    assert.equal(workspaceToggle(document).getAttribute('aria-expanded'), 'true');
+    dispose();
+    assert.equal(groupToggle(document), null);
+    assert.equal(workspaceToggle(document), null);
+    assert.notEqual(dom.window.getComputedStyle(document.querySelector('nav')).display, 'none');
+    assert.notEqual(dom.window.getComputedStyle(document.getElementById('workspace-list')).display, 'none');
   } finally { dispose(); dom.window.close(); }
 });
 

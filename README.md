@@ -8,7 +8,7 @@
 
 | 插件 | 版本 | 功能 | 实现边界 |
 | --- | --- | --- | --- |
-| [dk-navigation-fold](packages/dk-navigation-fold/README.md) | 0.2.0 | 独立折叠功能导航与工作区列表，保留 Logo、新会话及工作区标题操作 | 基于原侧栏 DOM 的可撤销增强，非官方稳定插槽 |
+| [dk-navigation-fold](packages/dk-navigation-fold/README.md) | 0.2.1 | 独立折叠功能导航与工作区列表，保留 Logo、新会话及工作区标题操作 | 基于原侧栏 DOM 的可撤销增强，非官方稳定插槽 |
 
 ## 结构
 
