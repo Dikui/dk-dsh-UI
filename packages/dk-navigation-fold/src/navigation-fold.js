@@ -20,6 +20,12 @@ button[data-dk-fold-toggle]{display:flex;align-items:center;gap:var(--dsh-sideba
 button[data-dk-fold-toggle]:focus-visible{outline:2px solid var(--dsw-alias-label-primary,currentColor);outline-offset:-2px}
 button[data-dk-fold-toggle] svg{width:14px;height:14px;flex-shrink:0;transition:transform 120ms ease}
 button[data-dk-fold-toggle][aria-expanded=false] svg{transform:rotate(-90deg)}
+/* The first transparent menu row already has internal leading. Keep 8px
+   after New Session, but do not stack a grid spacer and margins below the
+   heading. Preserve the other rc.2 rows and scope to our adjacent scrollport. */
+button[data-dk-navigation-fold-toggle]:has(+ div > [data-sidebar-scrollport]){margin-top:8px;margin-bottom:0}
+button[data-dk-navigation-fold-toggle] + div:has(> [data-sidebar-scrollport]){margin-top:0}
+button[data-dk-navigation-fold-toggle] + div > [data-sidebar-scrollport]{grid-template-rows:0px max-content 2px max-content}
 button[data-dk-workspace-fold-toggle]{flex:1 1 0;width:0;max-width:none;min-width:0;margin:0;padding:0}
 button[data-dk-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 [data-sidebar-collapsed=true] button[data-dk-fold-toggle] span{display:none}

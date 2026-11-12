@@ -208,6 +208,113 @@ test('rc.2 网格滚动区中仍可折叠导航与工作区，导航开关不进
   } finally { dispose(); dom.window.close(); }
 });
 
+// small/regression — user clarified Navigation needs symmetric upper/lower spacing (2026-11-12).
+// Replay the official rc.2 flex/grid rules and panel-entry wrappers, including
+// the pseudo-elements that occupy gap rows. This is a CSS contract, not pixel validation.
+function prepareRc2Spacing(window) {
+  const { document } = window;
+  document.getElementById('scroll-region').classList.add('host-scroll-region');
+  for (const button of document.querySelectorAll('nav > button')) {
+    const entry = document.createElement('div');
+    entry.className = 'host-panel-entry';
+    button.before(entry);
+    entry.append(button);
+    button.classList.add('host-panel-row');
+  }
+  const style = document.createElement('style');
+  style.textContent = `#sidebar{display:flex;flex-direction:column;height:720px}
+    #new-session{flex:none;height:38px;margin:0 4px}
+    .host-scroll-region{margin-top:4px;flex:1;min-height:0;display:flex;flex-direction:column}
+    [data-sidebar-scrollport]{flex:1;min-height:0;display:grid;grid-template-columns:4px minmax(0,1fr) 6px;grid-template-rows:8px max-content 2px max-content;align-content:start}
+    [data-sidebar-scrollport]::before,[data-sidebar-scrollport]::after{content:'';grid-column:2;pointer-events:none}
+    [data-sidebar-scrollport]::before{grid-row:1}
+    [data-sidebar-scrollport]::after{grid-row:3}
+    [data-sidebar-scrollport]>nav{grid-column:2;grid-row:2;flex:none;display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
+    [data-sidebar-scrollport]>#region-area{grid-column:2;grid-row:4}
+    .host-panel-entry{display:flex;position:relative}
+    .host-panel-row{display:flex;align-items:center;box-sizing:border-box;min-height:32px;margin:0;padding:5px 9px;border:0;line-height:22px}`;
+  document.head.append(style);
+}
+
+function assertRc2HeadingSpacing(document) {
+  const computed = element => document.defaultView.getComputedStyle(element);
+  const heading = computed(groupToggle(document));
+  const scrollRegion = computed(document.getElementById('scroll-region'));
+  const scrollArea = computed(document.getElementById('scroll-area'));
+  const nav = computed(document.querySelector('nav'));
+  assert.equal(computed(document.getElementById('sidebar')).flexDirection, 'column');
+  assert.equal(computed(document.getElementById('new-session')).marginBottom, '0px');
+  assert.equal(heading.marginTop, '8px', '新会话到标题上边缘保留 8px');
+  assert.equal(heading.marginBottom, '0px', '不再叠加标题下边距');
+  assert.equal(scrollRegion.marginTop, '0px', '不再叠加滚动区上边距');
+  assert.equal(scrollRegion.flexDirection, 'column');
+  assert.equal(scrollArea.display, 'grid');
+  assert.equal(scrollArea.gridTemplateRows,
+    '0px max-content 2px max-content', '标题下方不再叠加首个菜单行内留白以外的 8px 网格空行');
+  assert.equal(nav.gridRow, '2', '只收起首行留白，不移动导航与工作区的网格位置');
+  // Equal outer margins are not equal visible spacing: the transparent first
+  // menu row also has internal leading, unlike New Session's painted edge.
+  // Guard the extra spacer directly; JSDOM cannot assert rendered ink bounds.
+  assert.equal(parseFloat(heading.marginBottom) + parseFloat(scrollRegion.marginTop) +
+    parseFloat(scrollArea.gridTemplateRows), 0);
+  assert.equal(nav.gap, '2px');
+  assert.equal(nav.marginBottom, '8px', '导航到工作区的既有间距不变');
+  assert.equal(computed(document.querySelector('nav > .host-panel-entry > button')).minHeight,
+    '32px', '真实菜单包装层内的行高不变');
+  assert.equal(computed(workspaceToggle(document)).minHeight, '36px', '工作区标题高度不变');
+}
+
+test('rc.2 标题下方不叠加网格留白，折叠与展开不改间距', () => {
+  const { dom, document, dispose } = setup(sidebarMarkupRc2(), prepareRc2Spacing);
+  try {
+    assertRc2HeadingSpacing(document);
+    groupToggle(document).click();
+    assert.equal(dom.window.getComputedStyle(document.querySelector('nav')).display, 'none');
+    groupToggle(document).click();
+    assertRc2HeadingSpacing(document);
+  } finally { dispose(); dom.window.close(); }
+});
+
+test('rc.2 宿主样式晚加载也不恢复标题下方的额外空行', () => {
+  const { dom, document, dispose } = setup(sidebarMarkupRc2());
+  try {
+    prepareRc2Spacing(dom.window);
+    assertRc2HeadingSpacing(document);
+  } finally { dispose(); dom.window.close(); }
+});
+
+test('只移除导航标题相邻滚动区的空行，不影响其他滚动区', () => {
+  const { dom, document, dispose } = setup(sidebarMarkupRc2(), window => {
+    prepareRc2Spacing(window);
+    const unrelated = window.document.createElement('div');
+    unrelated.innerHTML = '<div id="unrelated-scrollport" data-sidebar-scrollport></div>';
+    window.document.body.append(unrelated);
+  });
+  try {
+    assertRc2HeadingSpacing(document);
+    assert.equal(dom.window.getComputedStyle(document.getElementById('unrelated-scrollport')).gridTemplateRows,
+      '8px max-content 2px max-content');
+  } finally { dispose(); dom.window.close(); }
+});
+
+test('停用插件恢复 rc.2 原有滚动区间距', () => {
+  const { dom, document, dispose } = setup(sidebarMarkupRc2(), prepareRc2Spacing);
+  try {
+    dispose();
+    assert.equal(groupToggle(document), null);
+    assert.equal(dom.window.getComputedStyle(document.getElementById('scroll-region')).marginTop, '4px');
+    assert.equal(dom.window.getComputedStyle(document.getElementById('scroll-area')).gridTemplateRows,
+      '8px max-content 2px max-content');
+  } finally { dispose(); dom.window.close(); }
+});
+
+test('无 rc.2 滚动区的侧栏保留原导航标题下边距', () => {
+  const { dom, document, dispose } = setup();
+  try {
+    assert.equal(dom.window.getComputedStyle(groupToggle(document)).marginBottom, '4px');
+  } finally { dispose(); dom.window.close(); }
+});
+
 test('rc.2 侧栏整体重建后重新定位，停用恢复原结构', async () => {
   const { dom, document, dispose } = setup(sidebarMarkupRc2());
   try {
@@ -511,9 +618,10 @@ test('本地存储不可用也可操作；清理后无额外按钮、隐藏属�
 });
 
 test('构建产物通过宿主模块入口挂载，插件生命周期结束即恢复导航', async () => {
-  const dom = new JSDOM(`<!doctype html><html><head></head><body>${sidebarMarkup()}</body></html>`, {
+  const dom = new JSDOM(`<!doctype html><html><head></head><body>${sidebarMarkupRc2()}</body></html>`, {
     url: 'http://localhost/', pretendToBeVisual: true,
   });
+  prepareRc2Spacing(dom.window);
   const disposers = [];
   try {
     let client;
@@ -526,6 +634,7 @@ test('构建产物通过宿主模块入口挂载，插件生命周期结束即�
     client.apply({ effect(start) { disposers.push(start()); } });
     const toggle = groupToggle(dom.window.document);
     assert.ok(toggle);
+    assertRc2HeadingSpacing(dom.window.document);
     for (const [language, expected] of [['en', 'Navigation'], ['zh-CN', '功能导航']]) {
       dom.window.document.documentElement.lang = language;
       await nextDomUpdate(dom.window);

@@ -1,6 +1,6 @@
 {
   "name": "dk-navigation-fold",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "侧栏分组折叠：独立收起功能导航与工作区列表，保留官方侧栏操作。",
   "type": "module",
