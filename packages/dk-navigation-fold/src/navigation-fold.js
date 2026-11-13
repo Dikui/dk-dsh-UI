@@ -1,140 +1,163 @@
 /**
- * Add reversible, independent group toggles to the current official sidebar DOM.
- * This is a structural adapter, not an official sidebar extension contract.
+ * Switch the official sidebar between the workspace browser and the panel
+ * navigation. Only one group is rendered at a time, so scrolling one group can
+ * no longer push the other group's heading around. This is a structural adapter
+ * for the shipped sidebar DOM, not an official sidebar extension contract.
  * @param {Document} document
  * @returns {() => void} Restore the original sidebar and remove the enhancement.
  */
 export function installNavigationFold(document) {
   const window = document.defaultView;
   if (!window || !document.body) return () => {};
+  // The host may re-apply a client plugin without disposing the previous run
+  // (reload, re-enable, hot update), and every run would stack its own switch
+  // above the same sidebar. Take over from that run instead of doubling up.
+  const instanceKey = Symbol.for('dk-navigation-fold.instance');
+  const previous = document[instanceKey];
+  if (typeof previous === 'function') previous();
+  // Also drop artifacts left by a build that could not register itself.
+  for (const stale of document.querySelectorAll(
+    '[data-dk-panel-switcher],[data-dk-navigation-fold-style],[data-dk-navigation-fold-toggle],[data-dk-workspace-header-spacer]',
+  )) stale.remove();
+  for (const stale of document.querySelectorAll('[data-dk-panel-hidden],[data-dk-navigation-fold-hidden]')) {
+    stale.removeAttribute('data-dk-panel-hidden');
+    stale.removeAttribute('data-dk-navigation-fold-hidden');
+  }
   const style = document.createElement('style');
   style.dataset.dkNavigationFoldStyle = '';
-  // The host workspace header already provides row padding. Add it only to the
-  // standalone navigation heading so both chevrons and labels share one grid.
-  // Keep both headings visually light; the workspace hit area fills only the
-  // space before the native toolbar, without resizing or covering its controls.
+  // The switch sits above the scrollport, so it keeps its place while the
+  // selected list scrolls. Host nodes are only ever hidden, never moved: the
+  // host still owns every node it renders, including their order.
   style.textContent = `
+[data-dk-panel-switcher]{display:flex;gap:2px;flex-shrink:0;box-sizing:border-box;margin:8px 8px 0;padding:0 4px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(127,127,127,.18))}
+[data-dk-panel-switcher] button[role=tab]{flex:1 1 0;min-width:0;min-height:30px;margin-bottom:-1px;padding:0 6px 6px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary,currentColor);font:inherit;font-size:12px;font-weight:400;line-height:20px;text-align:center;cursor:pointer;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;-webkit-app-region:no-drag}
+@media(hover:hover){[data-dk-panel-switcher] button[role=tab][aria-selected=false]:hover{color:var(--dsw-alias-label-primary,currentColor)}}
+[data-dk-panel-switcher] button[role=tab][aria-selected=true]{color:var(--dsw-alias-label-primary,currentColor);border-bottom-color:currentColor}
+[data-dk-panel-switcher] button[role=tab]:focus-visible{outline:2px solid var(--dsw-alias-label-primary,currentColor);outline-offset:-2px}
+[data-dk-panel-hidden]{display:none!important}
 [data-dk-navigation-fold-hidden]{display:none!important}
-button[data-dk-fold-toggle]{display:flex;align-items:center;gap:var(--dsh-sidebar-label-gap,6px);flex-shrink:0;box-sizing:border-box;width:100%;min-height:36px;margin:2px 0 4px;padding:0 var(--dsh-sidebar-row-padding,12px);border:0;border-radius:var(--dsw-radius-md,7px);background:transparent;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary,currentColor));font:inherit;font-size:12px;font-weight:400;line-height:20px;text-align:left;cursor:pointer;-webkit-app-region:no-drag}
-@media(hover:hover){button[data-dk-fold-toggle]:hover{color:var(--dsw-alias-label-secondary,currentColor)}}
-button[data-dk-fold-toggle]:focus-visible{outline:2px solid var(--dsw-alias-label-primary,currentColor);outline-offset:-2px}
-button[data-dk-fold-toggle] svg{width:14px;height:14px;flex-shrink:0;transition:transform 120ms ease}
-button[data-dk-fold-toggle][aria-expanded=false] svg{transform:rotate(-90deg)}
-/* The first transparent menu row already has internal leading. Keep 8px
-   after New Session, but do not stack a grid spacer and margins below the
-   heading. Preserve the other rc.2 rows and scope to our adjacent scrollport. */
-button[data-dk-navigation-fold-toggle]:has(+ div > [data-sidebar-scrollport]){margin-top:8px;margin-bottom:0}
-button[data-dk-navigation-fold-toggle] + div:has(> [data-sidebar-scrollport]){margin-top:0}
-button[data-dk-navigation-fold-toggle] + div > [data-sidebar-scrollport]{grid-template-rows:0px max-content 2px max-content}
-button[data-dk-workspace-fold-toggle]{flex:1 1 0;width:0;max-width:none;min-width:0;margin:0;padding:0}
-button[data-dk-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-[data-sidebar-collapsed=true] button[data-dk-fold-toggle] span{display:none}
-[data-sidebar-collapsed=true] button[data-dk-fold-toggle]{width:auto;margin-inline:0;padding-inline:0;justify-content:center}
-@media(prefers-reduced-motion:reduce){button[data-dk-fold-toggle] svg{transition:none}}
+/* The tab already names the group, so the shipped heading keeps its row height
+   through this spacer instead of repeating the same word twice. */
+[data-dk-workspace-header-spacer]{flex-grow:1;flex-shrink:1;flex-basis:0;min-width:0}
+/* One panel at a time: drop the grid's top spacer and the row between panels. */
+[data-dk-panel-switcher]+div>[data-sidebar-scrollport]{grid-template-rows:0px max-content 0px max-content}
+[data-dk-panel-switcher]+div:has(> [data-sidebar-scrollport]){margin-top:0}
 `;
   document.head.append(style);
 
-  // Both groups use the same lifecycle, focus and persistence rules. New writes
-  // use the dk- keys; the pre-rename dsh- keys remain readable as a fallback.
-  function createFold(kind, storageKey, legacyStorageKey) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.dataset.dkFoldToggle = '';
-    button.setAttribute(`data-dk-${kind}-fold-toggle`, '');
-    const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    chevron.setAttribute('viewBox', '0 0 16 16');
-    chevron.setAttribute('fill', 'none');
-    chevron.setAttribute('aria-hidden', 'true');
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', 'm4 6 4 4 4-4');
-    path.setAttribute('stroke', 'currentColor');
-    path.setAttribute('stroke-width', '1.5');
-    path.setAttribute('stroke-linecap', 'round');
-    path.setAttribute('stroke-linejoin', 'round');
-    chevron.append(path);
-    const text = document.createElement('span');
-    button.append(chevron, text);
-    let closed = false;
-    try {
-      closed = (window.localStorage.getItem(storageKey) ?? window.localStorage.getItem(legacyStorageKey)) === 'true';
-    } catch { /* Memory still works when storage is unavailable. */ }
-    let binding = null;
-    let ownedId = null;
-    function persist() {
-      try { window.localStorage.setItem(storageKey, String(closed)); } catch { /* Keep the current page usable if persistence is denied. */ }
-    }
-    function reveal(event) {
-      if (!closed || button.contains(event.target)) return;
-      closed = false;
-      persist();
-      render();
-    }
-    function detach() {
-      if (binding) {
-        binding.content.removeAttribute('data-dk-navigation-fold-hidden');
-        binding.title?.removeAttribute('data-dk-navigation-fold-hidden');
-        if (ownedId && binding.content.id === ownedId) binding.content.removeAttribute('id');
-        binding.header?.removeEventListener('click', reveal, true);
-        binding.header?.removeEventListener('focusin', reveal);
-      }
-      binding = null;
-      ownedId = null;
-      button.remove();
-      button.removeAttribute('aria-controls');
-    }
-    function render() {
-      if (!binding) return;
-      const { content, anchor, title, search, label } = binding;
-      if (button.nextElementSibling !== anchor) anchor.before(button);
-      const caption = title?.textContent.trim() || label;
-      if (text.textContent !== caption) text.textContent = caption;
-      if (button.getAttribute('aria-label') !== caption) button.setAttribute('aria-label', caption);
-      const searching = search?.getAttribute('aria-expanded') === 'true';
-      if (searching && closed) { closed = false; persist(); }
-      if (closed && content.contains(document.activeElement)) button.focus();
-      content.toggleAttribute('data-dk-navigation-fold-hidden', closed);
-      title?.setAttribute('data-dk-navigation-fold-hidden', '');
-      button.toggleAttribute('data-dk-navigation-fold-hidden', searching);
-      const expanded = String(!closed);
-      if (button.getAttribute('aria-expanded') !== expanded) button.setAttribute('aria-expanded', expanded);
-      button.setAttribute('aria-controls', content.id);
-    }
-    function onClick() {
-      closed = !closed;
-      persist();
-      render();
-    }
-    button.addEventListener('click', onClick);
-    return {
-      sync(next) {
-        if (next?.content !== binding?.content || next?.anchor !== binding?.anchor ||
-          next?.header !== binding?.header || next?.search !== binding?.search) detach();
-        if (!next) return;
-        if (!binding) {
-          next.header?.addEventListener('click', reveal, true);
-          next.header?.addEventListener('focusin', reveal);
-        }
-        // Captions can change while their DOM anchors and fold state stay the same.
-        binding = next;
-        if (!binding.content.id) {
-          let index = 1;
-          while (document.getElementById(`dk-${kind}-fold-group-${index}`)) index++;
-          ownedId = `dk-${kind}-fold-group-${index}`;
-          binding.content.id = ownedId;
-        }
-        render();
-      },
-      dispose() {
-        button.removeEventListener('click', onClick);
-        detach();
-      },
-    };
+  // Left-to-right order of the switch; the workspace list stays the default view.
+  const panels = ['navigation', 'workspace'];
+  const storageKey = 'dk-navigation-fold:panel:v1';
+  const switcher = document.createElement('div');
+  switcher.setAttribute('data-dk-panel-switcher', '');
+  switcher.setAttribute('role', 'tablist');
+  const tabs = new Map();
+  // Ids we create for aria-controls are removed again on dispose.
+  const ownedIds = new Set();
+  let active = 'workspace';
+  let binding = null;
+  // Track the transition only: a panel that stays hidden must not fight the
+  // user who deliberately switches away from an open search.
+  let wasSearching = false;
+  let disposed = false;
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    if (panels.includes(stored)) active = stored;
+  } catch { /* Memory still works when storage is unavailable. */ }
+  function persist() {
+    try { window.localStorage.setItem(storageKey, active); } catch { /* Keep the current page usable if persistence is denied. */ }
   }
-  const navigationFold = createFold('navigation',
-    'dk-navigation-fold:collapsed:v1', 'dsh-navigation-fold:collapsed:v1');
-  const workspaceFold = createFold('workspace',
-    'dk-navigation-fold:workspaces-collapsed:v1', 'dsh-navigation-fold:workspaces-collapsed:v1');
-  let navigation = null;
+  function select(panel) {
+    if (!binding || active === panel) return;
+    active = panel;
+    persist();
+    render();
+  }
+  function setLabel(tab, label) {
+    if (tab.textContent !== label) tab.textContent = label;
+  }
+  for (const panel of panels) {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('data-dk-panel-tab', panel);
+    tab.addEventListener('click', () => select(panel));
+    // Roving tabindex: one stop in the tab order, arrows move between panels.
+    tab.addEventListener('keydown', event => {
+      const current = panels.indexOf(active);
+      const next = event.key === 'Home' ? panels[0]
+        : event.key === 'End' ? panels[panels.length - 1]
+        : event.key === 'ArrowRight' || event.key === 'ArrowDown' ? panels[(current + 1) % panels.length]
+        : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? panels[(current - 1 + panels.length) % panels.length]
+        : null;
+      if (!next) return;
+      event.preventDefault();
+      select(next);
+      tabs.get(next).focus();
+    });
+    tabs.set(panel, tab);
+    switcher.append(tab);
+  }
+  function attach(next) {
+    const spacer = document.createElement('span');
+    spacer.setAttribute('data-dk-workspace-header-spacer', '');
+    spacer.setAttribute('aria-hidden', 'true');
+    binding = { ...next, spacer };
+    for (const [panel, element] of [['workspace', next.workspace.browser], ['navigation', next.nav]]) {
+      if (element.id) continue;
+      let index = 1;
+      while (document.getElementById(`dk-panel-${panel}-${index}`)) index++;
+      element.id = `dk-panel-${panel}-${index}`;
+      ownedIds.add(element);
+    }
+  }
+  function detach() {
+    if (binding) {
+      binding.nav.removeAttribute('data-dk-panel-hidden');
+      binding.workspace.browser.removeAttribute('data-dk-panel-hidden');
+      binding.workspace.title?.removeAttribute('data-dk-navigation-fold-hidden');
+      binding.spacer.remove();
+    }
+    for (const element of ownedIds) element.removeAttribute('id');
+    ownedIds.clear();
+    binding = null;
+    wasSearching = false;
+    switcher.remove();
+  }
+  function render() {
+    if (!binding) return;
+    const { anchor, nav, workspace, spacer } = binding;
+    const { header, title, search } = workspace;
+    if (switcher.parentElement !== anchor.parentElement || switcher.nextElementSibling !== anchor) {
+      anchor.before(switcher);
+    }
+    if (title && (spacer.parentElement !== header || spacer.nextElementSibling !== title)) title.before(spacer);
+    setLabel(tabs.get('workspace'), workspace.label);
+    // DSH's locale service mirrors its active language to <html lang>.
+    // Follow that application setting, not the OS/browser language or host text.
+    const zh = /^zh(?:-|$)/i.test(document.documentElement.lang);
+    setLabel(tabs.get('navigation'), zh ? '功能导航' : 'Navigation');
+    const switcherLabel = zh ? '侧栏分组' : 'Sidebar sections';
+    if (switcher.getAttribute('aria-label') !== switcherLabel) switcher.setAttribute('aria-label', switcherLabel);
+    // A hidden panel cannot take focus, so follow the host when it opens search.
+    const searching = search.getAttribute('aria-expanded') === 'true';
+    if (searching && !wasSearching && active !== 'workspace') {
+      active = 'workspace';
+      persist();
+    }
+    wasSearching = searching;
+    for (const panel of panels) {
+      const tab = tabs.get(panel);
+      const selected = String(active === panel);
+      if (tab.getAttribute('aria-selected') !== selected) tab.setAttribute('aria-selected', selected);
+      tab.tabIndex = active === panel ? 0 : -1;
+      const target = panel === 'navigation' ? nav : workspace.browser;
+      target.toggleAttribute('data-dk-panel-hidden', active !== panel);
+      if (target.id) tab.setAttribute('aria-controls', target.id);
+    }
+    title?.setAttribute('data-dk-navigation-fold-hidden', '');
+    spacer.toggleAttribute('data-dk-navigation-fold-hidden', searching);
+  }
   function findNavigation() {
     // DSH 0.2.2-rc.2 moved the navigation into a grid scroll area below the
     // logo row, so the toggle and NAV no longer share a direct parent. Match
@@ -168,37 +191,42 @@ button[data-dk-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap;
     // anchor: region > [data-slot="sidebar.workspaces"] > browser > header + list.
     // Match the official addressable anchor, never arbitrary wrapper depths.
     // Narrow rails omit the title and have a different shape: leave them alone.
-    if (region.children.length !== 1) return null;
+    if (!region || region.children.length !== 1) return null;
     const slot = region.firstElementChild;
     if (slot.tagName !== 'DIV' || slot.getAttribute('data-slot') !== 'sidebar.workspaces' ||
       slot.children.length !== 1) return null;
     const browser = slot.firstElementChild;
-    const [header, content] = browser.children;
-    if (browser.tagName !== 'DIV' || browser.children.length !== 2 ||
-      header?.tagName !== 'DIV' || content?.tagName !== 'DIV') return null;
-    const children = [...header.children].filter(child => !child.hasAttribute('data-dk-workspace-fold-toggle'));
+    if (browser.tagName !== 'DIV' || browser.children.length !== 2) return null;
+    const [header, list] = browser.children;
+    if (header.tagName !== 'DIV' || list.tagName !== 'DIV') return null;
+    const children = [...header.children].filter(child => !child.hasAttribute('data-dk-workspace-header-spacer'));
     const title = children[0];
     const inputs = header.querySelectorAll('input[type=text]');
     if (title?.tagName !== 'SPAN' || !title.textContent.trim() || inputs.length !== 1) return null;
     const searches = inputs[0].parentElement.querySelectorAll('button[aria-expanded][aria-label]');
     if (searches.length !== 1) return null;
-    return { content, anchor: title, title, header, search: searches[0], label: title.textContent.trim() };
+    return { browser, header, title, search: searches[0], label: title.textContent.trim() };
   }
   function sync() {
-    navigation = findNavigation();
-    // DSH's locale service mirrors its active language to <html lang>.
-    // Follow that application setting, not the OS/browser language or host text.
-    const label = /^zh(?:-|$)/i.test(document.documentElement.lang) ? '功能导航' : 'Navigation';
-    navigationFold.sync(navigation
-      ? { content: navigation.nav, anchor: navigation.anchor, label }
-      : null);
-    workspaceFold.sync(navigation ? findWorkspace(navigation.nav.nextElementSibling) : null);
+    const navigation = findNavigation();
+    const workspace = navigation ? findWorkspace(navigation.nav.nextElementSibling) : null;
+    // Both groups must be addressable: hiding the navigation with no workspace
+    // panel to show in its place would leave an empty sidebar. The narrow rail
+    // renders no titled browser, so it fails the same check and keeps its layout.
+    const next = navigation && workspace
+      ? { root: navigation.root, anchor: navigation.anchor, nav: navigation.nav, workspace }
+      : null;
+    if (binding && (!next || next.root !== binding.root || next.anchor !== binding.anchor ||
+      next.nav !== binding.nav || next.workspace.browser !== binding.workspace.browser)) detach();
+    if (!next) return;
+    if (binding) binding.workspace = next.workspace;
+    else attach(next);
+    render();
   }
-  let disposed = false;
   let queued = false;
   const observer = new window.MutationObserver(records => {
     // Ignore streaming chat updates outside the sidebar; coalesce sidebar changes.
-    const sidebar = navigation?.root;
+    const sidebar = binding?.root;
     if (sidebar?.isConnected && !records.some(record =>
       record.type === 'attributes' || sidebar.contains(record.target) ||
       [...record.addedNodes, ...record.removedNodes].some(node => node.nodeType === 1 &&
@@ -220,14 +248,19 @@ button[data-dk-fold-toggle] span{min-width:0;overflow:hidden;white-space:nowrap;
     attributes: true,
     attributeFilter: ['data-sidebar-toggle', 'data-window-drag', 'data-slot', 'aria-label', 'aria-expanded'],
   });
-  // <html> is outside body: language-only changes otherwise never reach sync().
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] });
-  return () => {
+  // <html> is outside body: language changes otherwise never reach sync().
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['lang'],
+  });
+  const dispose = () => {
     if (disposed) return;
     disposed = true;
     observer.disconnect();
-    workspaceFold.dispose();
-    navigationFold.dispose();
+    detach();
     style.remove();
+    if (document[instanceKey] === dispose) delete document[instanceKey];
   };
+  document[instanceKey] = dispose;
+  return dispose;
 }
